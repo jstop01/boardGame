@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Save } from 'lucide-react';
 import { BoardGame } from '@/app/types/game';
+import { supabase } from '@/lib/supabase';
 
 interface AdminGameFormProps {
   games: BoardGame[];
@@ -63,7 +64,7 @@ export function AdminGameForm({ games, onSave }: AdminGameFormProps) {
     }));
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -79,16 +80,44 @@ export function AdminGameForm({ games, onSave }: AdminGameFormProps) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      setImagePreview(base64String);
+    try {
+      // 업로드 중 표시
+      setImagePreview('uploading');
+      
+      // 파일명 생성 (타임스탬프 + 원본 파일명)
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // Supabase Storage에 업로드
+      const { error: uploadError } = await supabase.storage
+        .from('game-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // 공개 URL 가져오기
+      const { data: { publicUrl } } = supabase.storage
+        .from('game-images')
+        .getPublicUrl(filePath);
+
+      setImagePreview(publicUrl);
       setFormData(prev => ({
         ...prev,
-        imageUrl: ''
+        imageUrl: publicUrl
       }));
-    };
-    reader.readAsDataURL(file);
+
+      alert('✅ 이미지 업로드 완료!');
+    } catch (error) {
+      console.error('이미지 업로드 실패:', error);
+      alert('❌ 이미지 업로드에 실패했습니다.');
+      setImagePreview('');
+    }
   };
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {

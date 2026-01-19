@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Header } from '@/app/components/Header';
 import { GameList } from '@/app/pages/GameList';
@@ -6,57 +6,138 @@ import { GameDetail } from '@/app/pages/GameDetail';
 import { AdminGameList } from '@/app/pages/AdminGameList';
 import { AdminGameForm } from '@/app/pages/AdminGameForm';
 import { BoardGame } from '@/app/types/game';
-
-const initialGames: BoardGame[] = [
-  {
-    id: '1',
-    name: '카탄',
-    recommendedPlayers: '3-4명',
-    description: '자원을 모아 섬을 개척하는 전략 게임입니다. 주사위를 굴려 자원을 얻고, 도로와 마을을 건설하여 점수를 획득합니다.',
-    rulesUrl: 'https://www.catan.com/game/catan',
-    imageUrl: 'https://images.unsplash.com/photo-1606733847546-db8546099013?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxib2FyZCUyMGdhbWUlMjBjYXRhbnxlbnwxfHx8fDE3Njg4MTE1ODF8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
-    createdAt: new Date('2024-01-01')
-  },
-  {
-    id: '2',
-    name: '스플렌더',
-    recommendedPlayers: '2-4명',
-    description: '보석 상인이 되어 부를 쌓는 게임입니다. 보석 토큰을 모아 카드를 구매하고, 귀족의 방문을 받아 승리 포인트를 획득합니다.',
-    rulesUrl: 'https://www.spacecowboys.fr/splendor',
-    imageUrl: 'https://images.unsplash.com/photo-1764733907486-0fa77a834dd9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxib2FyZCUyMGdhbWUlMjBjYXJkcyUyMGdlbXN8ZW58MXx8fHwxNzY4ODExNTgyfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
-    createdAt: new Date('2024-01-02')
-  },
-  {
-    id: '3',
-    name: '코드네임',
-    recommendedPlayers: '4-8명',
-    description: '단어 추리 파티 게임입니다. 스파이마스터의 힌트를 듣고 팀원들이 올바른 단어를 찾아야 합니다.',
-    rulesUrl: 'https://codenamesgame.com/',
-    imageUrl: 'https://images.unsplash.com/photo-1767510533187-6cb5a8743cf0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxib2FyZCUyMGdhbWUlMjBwYXJ0eSUyMGNhcmRzfGVufDF8fHx8MTc2ODgxMTU4Mnww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral',
-    createdAt: new Date('2024-01-03')
-  }
-];
+import { supabase } from '@/lib/supabase';
 
 export default function App() {
-  const [games, setGames] = useState<BoardGame[]>(initialGames);
+  const [games, setGames] = useState<BoardGame[]>([]);
   const [adminPassword, setAdminPassword] = useState('1234');
+  const [loading, setLoading] = useState(true);
 
-  const handleSaveGame = (game: BoardGame) => {
-    setGames(prev => {
-      const existingIndex = prev.findIndex(g => g.id === game.id);
-      if (existingIndex >= 0) {
-        const updated = [...prev];
-        updated[existingIndex] = game;
-        return updated;
+  // 게임 목록 불러오기
+  useEffect(() => {
+    fetchGames();
+    fetchAdminPassword();
+  }, []);
+
+  const fetchGames = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('board_games')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const formattedGames: BoardGame[] = (data || []).map(game => ({
+        id: game.id,
+        name: game.name,
+        recommendedPlayers: game.recommended_players,
+        description: game.description,
+        rulesUrl: game.rules_url,
+        imageUrl: game.image_url,
+        createdAt: new Date(game.created_at)
+      }));
+
+      setGames(formattedGames);
+    } catch (error) {
+      console.error('게임 목록 불러오기 실패:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAdminPassword = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('admin_settings')
+        .select('password')
+        .single();
+
+      if (error) throw error;
+      if (data) setAdminPassword(data.password);
+    } catch (error) {
+      console.error('비밀번호 불러오기 실패:', error);
+    }
+  };
+
+  const handleSaveGame = async (game: BoardGame) => {
+    try {
+      const gameData = {
+        id: game.id,
+        name: game.name,
+        recommended_players: game.recommendedPlayers,
+        description: game.description,
+        rules_url: game.rulesUrl,
+        image_url: game.imageUrl,
+        updated_at: new Date().toISOString()
+      };
+
+      // 기존 게임인지 확인
+      const { data: existingGame } = await supabase
+        .from('board_games')
+        .select('id')
+        .eq('id', game.id)
+        .single();
+
+      if (existingGame) {
+        // 수정
+        const { error } = await supabase
+          .from('board_games')
+          .update(gameData)
+          .eq('id', game.id);
+
+        if (error) throw error;
+      } else {
+        // 새로 추가
+        const { error } = await supabase
+          .from('board_games')
+          .insert([{ ...gameData, created_at: new Date().toISOString() }]);
+
+        if (error) throw error;
       }
-      return [...prev, game];
-    });
+
+      // 게임 목록 새로고침
+      await fetchGames();
+    } catch (error) {
+      console.error('게임 저장 실패:', error);
+      alert('❌ 게임 저장에 실패했습니다.');
+    }
   };
 
-  const handlePasswordChange = (newPassword: string) => {
-    setAdminPassword(newPassword);
-    alert('✅ 비밀번호가 성공적으로 변경되었습니다!');
+  const handlePasswordChange = async (newPassword: string) => {
+    try {
+      const { data: settings } = await supabase
+        .from('admin_settings')
+        .select('id')
+        .single();
+
+      if (settings) {
+        const { error } = await supabase
+          .from('admin_settings')
+          .update({ password: newPassword, updated_at: new Date().toISOString() })
+          .eq('id', settings.id);
+
+        if (error) throw error;
+
+        setAdminPassword(newPassword);
+        alert('✅ 비밀번호가 성공적으로 변경되었습니다!');
+      }
+    } catch (error) {
+      console.error('비밀번호 변경 실패:', error);
+      alert('❌ 비밀번호 변경에 실패했습니다.');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <BrowserRouter>
